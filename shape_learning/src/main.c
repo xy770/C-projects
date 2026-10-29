@@ -112,7 +112,7 @@ void canvas_print(){
 int main(void) {
     for(uint32_t i = 0; i < 100; ++i){
         canvas_clear();
-        //canvas_fill_circle_rand();
+        canvas_fill_circle_rand();
         canvas_fill_rect_rand();
         char file_path[256];
 
