@@ -24,7 +24,7 @@ void read_points_from_file(const char* path){
         fprintf(stderr, "Failed to open points file");
         return;
     }
-    
+
     if(points != NULL){
         free(points);
         point_capacity = 0;
@@ -38,14 +38,14 @@ void read_points_from_file(const char* path){
         if(point_capacity <= i){
             size_t times = 2;
             while (times * point_capacity <= i) {
-                times *= 2; 
+                times *= 2;
             }
             Point *tmp = realloc(points, times * point_capacity * sizeof(Point));
             if(tmp == NULL){
                 fprintf(stderr,"Failed to alloc mem");
                 fclose(fp);
                 free(points);
-                return; 
+                return;
             }
             point_capacity *= times;
             points = tmp;
