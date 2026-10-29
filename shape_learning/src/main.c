@@ -3,7 +3,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/_types/_null.h>
 
 #define SHAPE_HEIGHT 256
 #define SHAPE_WIDTH  256
@@ -66,6 +65,16 @@ void canvas_fill_circle_rand(){
     canvas_fill_circle(pos_x, pos_y, r, 1);
 }
 
+void canvas_fill_rect_rand(){
+    uint32_t width = (uint32_t)rand_float((float)(SHAPE_WIDTH + SHAPE_HEIGHT) / 20, (float)(SHAPE_WIDTH + SHAPE_HEIGHT) / 3);
+    uint32_t height = (uint32_t)rand_float((float)(SHAPE_WIDTH + SHAPE_HEIGHT) / 20, (float)(SHAPE_WIDTH + SHAPE_HEIGHT) / 3);
+
+    uint32_t pos_x = rand_float(1, SHAPE_WIDTH - width);
+    uint32_t pos_y = rand_float(1, SHAPE_WIDTH - height);
+
+    canvas_fill_rect(pos_x, pos_y, width, height, 1);
+}
+
 void save_ppm_to_file(const char* path){
     if(path == NULL) return;
     FILE *fp = fopen(path, "wb");
@@ -80,7 +89,7 @@ void save_ppm_to_file(const char* path){
     for(uint32_t y = 0; y < SHAPE_HEIGHT; ++y){
         for (uint32_t x = 0; x < SHAPE_WIDTH; ++x) {
             char content_buf[32] = {0};
-            snprintf(content_buf, 32, "%d 255 255\n", (int)canvas[y][x] * 255);
+            snprintf(content_buf, 32, "%d 0 0\n", (int)canvas[y][x] * 255);
             fwrite(content_buf, strlen(content_buf), 1, fp);
         }
     }
@@ -103,7 +112,8 @@ void canvas_print(){
 int main(void) {
     for(uint32_t i = 0; i < 100; ++i){
         canvas_clear();
-        canvas_fill_circle_rand();
+        //canvas_fill_circle_rand();
+        canvas_fill_rect_rand();
         char file_path[256];
 
         snprintf(file_path, 256, "./output/%03d.ppm", i);
