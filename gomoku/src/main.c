@@ -5,10 +5,11 @@
 #include <stdnoreturn.h>
 #include <string.h>
 
-#define BOARD_COL 7
-#define BOARD_ROW 7
+#define BOARD_COL 10
+#define BOARD_ROW 10
 #define BOARD_SIZE BOARD_ROW * BOARD_COL
 #define WIN_NUMS 5
+#define ENABLE_TRIM
 
 typedef enum{
     WHITE = 0x01,
@@ -22,10 +23,26 @@ typedef struct{
     int y;
 }Coord;
 
+typedef enum{
+    INFINITY_POS,
+    INFINITY_NEG,
+    INFINITY_NOP,
+}InfinityType;
+
+typedef struct{
+    int v;
+    int infinite;
+}Promise;
+
 int *board = NULL;
 int depth = 3;
 int current_round = BLACK;
 int totol_moves = 0;
+
+#define DUBEG
+#ifdef DUBEG
+#define DUBEG_ITER
+#endif
 
 void gomoku_init(){
     board = malloc(BOARD_SIZE * sizeof(*board));
@@ -40,13 +57,13 @@ ChessType get_chess_type(const int *board, int x, int y){
     if(x < 0 || y < 0) return UNKOWN;
     if(x >= BOARD_COL || y >= BOARD_ROW) return UNKOWN;
 
-    return board[x + (5 * y)];
+    return board[x + (BOARD_COL * y)];
 }
 
 void set_chess_type(int *board, unsigned int x, unsigned int y, ChessType type){
     if(x >= BOARD_COL || y >= BOARD_ROW) return;
 
-    board[x + (5 * y)] = type;
+    board[x + (BOARD_COL * y)] = type;
 }
 
 void print_chess_board(int *board){
@@ -63,6 +80,7 @@ void print_chess_board(int *board){
 
     printf("-------------------\n");
 }
+
 int same_count(const int *board, int x, int y, ChessType type){
     int count = 0;
 
@@ -131,14 +149,21 @@ static inline ChessType reverse_chess_type(ChessType type){
     }
 }
 
-int score_iter(int *board, int depth, int current_depth, ChessType type){
+#undef DUBEG_ITER
+int score_iter(int *board, int depth, int current_depth, ChessType type, Promise parent_promise){
     ChessType current_type = type;
-    if(current_depth % 2 == 0) current_type = reverse_chess_type(type);
+    Promise ret;
+    bool allow_skip = 0;
+
+    if(current_depth % 2 == 0){
+        current_type = reverse_chess_type(type);
+        ret = (Promise){ .infinite = INFINITY_POS };
+    }else {
+        ret = (Promise){ .infinite = INFINITY_NEG };
+    }
 
     int scores[BOARD_SIZE] = {0};
     int count = 0;
-    int ret = 0;
-    int is_ret_modified = 0;
 
     for(int y = 0; y < BOARD_ROW; ++y){
         for(int x = 0; x < BOARD_COL; ++x){
@@ -150,43 +175,71 @@ int score_iter(int *board, int depth, int current_depth, ChessType type){
                     ChessType rev = reverse_chess_type(type);
                     int min = calc_score(board, rev);
                     scores[count] = max - min;
+#ifdef DUBEG_ITER
                     print_chess_board(board);
-                    printf("calculated score: %d max = %d min = %d\n", scores[count], max, min);
-
+                    printf("Reach the bottom: %d max = %d min = %d\n", scores[count], max, min);
+#endif
                     if(current_type == type){
-                        if(is_ret_modified){
-                            ret = ret > scores[count] ? ret : scores[count];
+                        if(ret.infinite == INFINITY_NOP){
+                            ret.v = ret.v > scores[count] ? ret.v : scores[count];
                         }else {
-                            ret = scores[count];
-                            is_ret_modified = 1;
+                            ret.v = scores[count];
+                            ret.infinite = INFINITY_NOP;
                         }
+#ifdef ENABLE_TRIM
+                        assert(parent_promise.infinite != INFINITY_NEG);
+                        if(parent_promise.infinite == INFINITY_NOP){
+                            if(ret.v >= parent_promise.v) allow_skip = 1;
+                        }
+#endif
                     }else{
-                        if(is_ret_modified){
-                            ret = ret < scores[count] ? ret : scores[count];
+                        if(ret.infinite == INFINITY_NOP){
+                            ret.v = ret.v < scores[count] ? ret.v : scores[count];
                         }else {
-                            ret = scores[count];
-                            is_ret_modified = 1;
+                            ret.v = scores[count];
+                            ret.infinite = INFINITY_NOP;
                         }
+#ifdef ENABLE_TRIM
+                        assert(parent_promise.infinite != INFINITY_POS);
+                        if(parent_promise.infinite == INFINITY_NOP){
+                            if(ret.v <= parent_promise.v) allow_skip = 1;
+                        }
+#endif
                     }
 
                     ++count;
                 }else {
-                    scores[count] = score_iter(board, depth, current_depth + 1, type);
-
+                    scores[count] = score_iter(board, depth, current_depth + 1, type, ret);
+#ifdef DUBEG_ITER
+                    print_chess_board(board);
+                    printf("Current depth = %d score = %d\n", current_depth, scores[count]);
+#endif
                     if(current_type == type){
-                        if(is_ret_modified){
-                            ret = ret > scores[count] ? ret : scores[count];
+                        if(ret.infinite == INFINITY_NOP){
+                            ret.v = ret.v > scores[count] ? ret.v : scores[count];
                         }else {
-                            ret = scores[count];
-                            is_ret_modified = 1;
+                            ret.v = scores[count];
+                            ret.infinite = INFINITY_NOP;
                         }
+#ifdef ENABLE_TRIM
+                        assert(parent_promise.infinite != INFINITY_NEG);
+                        if(parent_promise.infinite == INFINITY_NOP){
+                            if(ret.v >= parent_promise.v) allow_skip = 1;
+                        }
+#endif
                     }else{
-                        if(is_ret_modified){
-                            ret = ret < scores[count] ? ret : scores[count];
+                        if(ret.infinite == INFINITY_NOP){
+                            ret.v = ret.v < scores[count] ? ret.v : scores[count];
                         }else {
-                            ret = scores[count];
-                            is_ret_modified = 1;
+                            ret.v = scores[count];
+                            ret.infinite = INFINITY_NOP;
                         }
+#ifdef ENABLE_TRIM
+                        assert(parent_promise.infinite != INFINITY_POS);
+                        if(parent_promise.infinite == INFINITY_NOP){
+                            if(ret.v <= parent_promise.v) allow_skip = 1;
+                        }
+#endif
                     }
 
                     ++count;
@@ -194,17 +247,19 @@ int score_iter(int *board, int depth, int current_depth, ChessType type){
 
                 set_chess_type(board, x, y, EMPTY);
             }
+            
+            if(allow_skip) return ret.v;
         }
     }
 
-    return ret;
+    return ret.v;
 }
 
 int main(void) {
     gomoku_init();
-    set_chess_type(board,3, 3, BLACK);
-    int s = calc_score(board, BLACK);
-    int score = score_iter(board, 3, 1, WHITE);
+    set_chess_type(board, 3,3 , BLACK);
+    Promise promise = (Promise){.infinite = INFINITY_POS};
+    int score = score_iter(board, 3, 1, WHITE, promise);
     print_chess_board(board);
     printf("score = %d", score);
     return 0;
