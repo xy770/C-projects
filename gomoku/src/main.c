@@ -5,10 +5,10 @@
 #include <stdnoreturn.h>
 #include <string.h>
 
-#define BOARD_COL 3
-#define BOARD_ROW 3
+#define BOARD_COL 10
+#define BOARD_ROW 10
 #define BOARD_SIZE BOARD_ROW * BOARD_COL
-#define WIN_NUMS 3
+#define WIN_NUMS 5
 #define ENABLE_TRIM
 
 typedef enum{
@@ -73,7 +73,7 @@ void print_chess_board(int *board){
         for(int x = 0; x < BOARD_COL; ++x){
             if(get_chess_type(board, x, y) == WHITE) printf("w");
             if(get_chess_type(board, x, y) == BLACK) printf("b");
-            if(get_chess_type(board, x, y) == EMPTY) printf("0");
+            if(get_chess_type(board, x, y) == EMPTY) printf("*");
         }
         printf("\n");
     }
@@ -110,9 +110,10 @@ int same_count_down(const int *board, int x, int y, ChessType type, int same_num
             }
             continue;
         }
-        break;
+
         if(continuous) break;
     }
+
     return count;
 }
 
@@ -125,7 +126,7 @@ int same_count_slash(const int *board, int x, int y, ChessType type, int same_nu
             }
             continue;
         }
-        break;
+
         if(continuous) break;
     }
 
@@ -166,9 +167,14 @@ int calc_score(int *board, ChessType type){
         for(int x = 0; x < BOARD_COL; ++x){
             int calc_empty = type | EMPTY;
 
-            score += same_count(board, x, y, calc_empty, WIN_NUMS);
             if(same_count(board, x, y, calc_empty, WIN_NUMS) > 0){
                 int right = same_count_right(board, x, y, type, WIN_NUMS, false);
+                int down = same_count_down(board, x, y, type, WIN_NUMS, false);
+                int slash = same_count_slash(board, x, y, type, WIN_NUMS, false);
+                int slash_r = same_count_slash_r(board, x, y, type, WIN_NUMS, false);
+
+                int s[] = {0, 10, 100, 10000, 100000, 1000000};
+                score += s[right] + s[down] + s[slash] + s[slash_r];
             }
         }
     }
@@ -242,9 +248,9 @@ int score_iter(int *board, int depth, int current_depth, ChessType type, Promise
                 if(calc_result(board, current_type, WIN_NUMS) > 0){
                     set_chess_type(board, x, y, EMPTY);
                     if(type == current_type){
-                        return 9999999;
+                        return 1e9;
                     }else {
-                        return -9999999;
+                        return -1e9;
                     }
                 }
 
