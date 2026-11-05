@@ -23,6 +23,21 @@ typedef struct{
     size_t capacity;
 }TokenList;
 
+typedef enum{
+    NODE_ADD, NODE_MUL, NODE_SUB, NODE_DIV,
+}NodeKind;
+
+typedef struct Node Node;
+struct Node{
+    NodeKind kind;
+    Node *left;
+    Node *right;
+};
+
+// expr -> term ('+' term | '-' term)*
+// term -> factor ('*' factor | '/' factor)*
+// factor -> NUM | '(' expr ')'
+
 TokenList token_list_alloc(size_t capacity){
     assert(capacity > 0);
 
@@ -67,6 +82,14 @@ void token_list_free(TokenList *list){
     list->data = NULL;
     list->len = 0;
     list->capacity = 0;
+}
+
+static inline Node node_new(NodeKind kind){
+    return (Node){
+        .kind = kind,
+        .left = NULL,
+        .right = NULL,
+    };
 }
 
 char* lexer_num(char *in, Token *out){
@@ -139,6 +162,8 @@ bool lexer(char* in, TokenList *out){
 
     return true;
 }
+
+// Node* parse_expr()
 
 int main(void) {
     char str[] = "1 * ( 2 + 92)";
