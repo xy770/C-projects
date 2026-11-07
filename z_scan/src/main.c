@@ -27,22 +27,32 @@ int main(void){
     for(int i = 0; i < 2 * n - 1; ++i){
         int x = 0;
         int y = 0;
-        if(i % 2 == 0){
-            x = 0;
-            y = i;
+        if(i + 1 <= n){
+            if(i % 2 == 0){
+                x = 0;
+                y = i;
+            }else {
+                x = i;
+                y = 0;
+            }
         }else {
-            x = i;
-            y = 0;
+            if(i % 2 == 0){
+                x = i + 1 - n;
+                y = n - 1;
+            }else {
+                x = n - 1;
+                y = i + 1 - n;
+            }
         }
-        
+                
         while (is_mat_at(x, y)) {
-            if(i + 1 == n * n){
+            if(i == 2 * n - 2){
                 printf("%d\n", mat_at(x, y));
                 break;
             }
             printf("%d ", mat_at(x, y));
             x += mode;
-            y += mode;
+            y -= mode;
         }
 
         mode = -mode;
