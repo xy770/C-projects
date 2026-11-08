@@ -1,9 +1,11 @@
 #include <assert.h>
 #include <ctype.h>
+#include <stdalign.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
+#include <string.h>
 
 typedef enum{
     TOK_NUM,
@@ -14,7 +16,7 @@ typedef enum{
 
 typedef struct{
     TokenKind kind;
-    int num;
+    float num;
 }Token;
 
 typedef struct{
@@ -32,28 +34,98 @@ typedef enum{
 typedef struct Node Node;
 struct Node{
     NodeKind kind;
-    int num;
+    float num;
     Node *left;
     Node *right;
 };
 
 typedef struct{
     const TokenList *list;
-    size_t from;
-    size_t to;
     size_t offset;
 }Parser;
+
+typedef struct Arena Arena;
+struct Arena{
+    size_t capacity;
+    size_t used;
+    Arena *next;
+    alignas(max_align_t) char data[];
+};
 
 // expr -> term ('+' term | '-' term)*
 // term -> factor ('*' factor | '/' factor)*
 // factor -> NUM | '(' expr ')'
 #define TOKEN_LIST_END(x) ((x).len - 1)
 
-bool parse_expr(Node *dest, Parser parser);
-bool parse_term(Node *dest, Parser parser);
-bool parse_factor(Node *dest, Parser parser);
+Node* parse_expr(Arena *arena, Parser *parser);
+Node* parse_term(Arena *arena, Parser *parser);
+Node* parse_factor(Arena *arena, Parser *parser);
 
-TokenList token_list_alloc(){
+#define MAX_ALIGN 8
+#define INITIAL_ARENA_SIZE 1024
+
+size_t align_up(size_t n, size_t align){
+    assert(align % 2 == 0);
+    return (n + align - 1) & ~(align - 1);
+}
+
+void arena_free(Arena **a){
+    if(a == NULL || *a == NULL) return;
+
+    Arena *arenas[256] = {0};
+    int i = 0;
+    arenas[i] = *a;
+    while (arenas[i]->next != NULL){
+        arenas[i+1] = arenas[i]->next;
+        ++i;
+    }
+
+    for(int j = i; j >= 0; --j){
+        free(arenas[j]);
+    }
+
+    *a = NULL;
+}
+
+Arena* arena_alloc(void){
+    Arena *a = NULL;
+
+    size_t target_cap = INITIAL_ARENA_SIZE;
+    align_up(target_cap, MAX_ALIGN);
+
+    a = malloc(sizeof(Arena) + target_cap);
+    if(a == NULL) return NULL;
+
+    a->capacity = target_cap;
+    a->used = 0;
+    a->next = NULL;
+
+    return a;
+}
+
+void* arena_pick(Arena *a, size_t size){
+    if(size > INITIAL_ARENA_SIZE) return NULL;
+    size = align_up(size, MAX_ALIGN);
+
+    Arena *end = a;
+
+    while (end->next != NULL) {
+        end = end->next;
+    }
+
+    if(end->used + size > end->capacity){
+        end->next = arena_alloc();
+        if(end->next == NULL) return NULL;
+        end = end->next;
+    }
+
+    void *ptr = (void*)(end->data + end->used);
+    end->used += size;
+
+    return ptr;
+}
+
+TokenList token_list_new(){
     TokenList list = (TokenList){
         .data = NULL,
         .len = 0,
@@ -92,69 +164,6 @@ void token_list_free(TokenList *list){
     list->capacity = 0;
 }
 
-Parser parser_new(const TokenList *list, size_t from, size_t to){
-    if(list == NULL){ from = 0; to = 0;}
-    if(list->len == 0){ from = 0; to = 0;}
-
-    size_t to_max = list->len - 1;
-    to = to < to_max ? to : to_max;
-
-    return (Parser){
-        .list = list,
-        .from = from,
-        .to = to,
-        .offset = 0,
-    };
-}
-
-static inline void parser_reset(Parser *parser){
-    parser->offset = 0;
-}
-
-bool is_parser_valid(Parser *parser){
-    const size_t from = parser->from;
-    const size_t to = parser->to;
-
-    if(to >= parser->list->len || from > to || !parser->list->len) return false;
-
-    return true;
-}
-
-size_t parser_get_list_count(Parser *parser){
-    if(!is_parser_valid(parser)) return 0;
-
-    return parser->to - parser->from + 1;
-}
-
-bool parser_at(Token *dest, Parser *parser, size_t idx){
-    if(dest == NULL || parser == NULL || parser->list == NULL) return false;
-
-    const size_t from = parser->from;
-    const size_t to = parser->to;
-
-    if(!is_parser_valid(parser)) return false;
-    if(idx + from > to) return false;
-
-    *dest = parser->list->data[from + idx];
-
-    return true;
-}
-
-bool parser_next(Token *dest, Parser *parser){
-    if(dest == NULL || parser == NULL || parser->list == NULL) return false;
-
-    const size_t from = parser->from;
-    const size_t to = parser->to;
-    size_t *offset = &parser->offset;
-
-    if(!is_parser_valid(parser)) return false;
-
-    if(*offset + from > to) return false;
-
-    *dest = parser->list->data[from + (*offset)++];
-    return true;
-}
-
 static inline Node node_new(){
     return (Node){
         .kind = NODE_UNKNOWN,
@@ -162,6 +171,94 @@ static inline Node node_new(){
         .left = NULL,
         .right = NULL,
     };
+}
+
+Token parser_peek(const Parser *parser){
+    Token eof = (Token){ .kind = TOK_EOF };
+    if(parser->offset >= parser->list->len) return eof;
+
+    return parser->list->data[parser->offset];
+}
+
+Token parser_advance(Parser *parser){
+    Token token = parser_peek(parser);
+    ++parser->offset;
+    return token;
+}
+
+Node* parse_factor(Arena *arena, Parser *parser){
+    Node* root = NULL;
+
+    TokenKind next = parser_peek(parser).kind;
+    if(next == TOK_NUM){
+       float num = parser_advance(parser).num;
+
+        root = arena_pick(arena, sizeof(*root));
+        if(root == NULL) return NULL;
+
+        root->kind = NODE_NUM;
+        root->left = NULL;
+        root->right = NULL;
+        root->num = num;
+
+        return root;
+    }else if(next == TOK_LPAREN){
+        parser_advance(parser);
+
+        root = parse_expr(arena, parser);
+
+        TokenKind rparen = parser_advance(parser).kind;
+        assert(rparen == TOK_RPAREN);
+
+        return root;
+    }
+
+    return NULL;
+}
+
+Node* parse_term(Arena *arena, Parser *parser){
+    Node *root = NULL;
+    Node *left = parse_factor(arena, parser);
+    if(left == NULL) return NULL;
+
+    TokenKind next = parser_peek(parser).kind;
+    if(next == TOK_MUL || next == TOK_DIV){
+        parser_advance(parser);
+
+        root = arena_pick(arena, sizeof(*root));
+        if(root == NULL) return NULL;
+
+        root->kind = next == TOK_MUL ? NODE_MUL : NODE_DIV;
+        root->left = left;
+        root->right = parse_term(arena, parser);
+        // TODO
+
+        return root;
+    }
+
+    return left;
+}
+
+Node* parse_expr(Arena *arena, Parser *parser){
+    Node* root = NULL;
+    Node* left = parse_term(arena, parser);
+    if(left == NULL) return NULL;
+
+    TokenKind next = parser_peek(parser).kind;
+    if(next == TOK_ADD || next == TOK_SUB){
+        parser_advance(parser);
+
+        root = arena_pick(arena, sizeof(*root));
+        if(root == NULL) return NULL;
+
+        root->kind = next == TOK_ADD ? NODE_ADD : NODE_SUB;
+        root->left = left;
+        root->right = parse_expr(arena, parser);
+
+        return root;
+    }
+
+    return left;
 }
 
 char* lexer_num(char *in, Token *out){
@@ -235,112 +332,68 @@ bool lexer(char* in, TokenList *out){
     return true;
 }
 
-bool parse_factor(Node *dest, Parser parser){
-    if(dest == NULL) return false;
+bool eval(float* dest, const Node* node){
+    if(dest == NULL || node == NULL) return false;
 
-    Token token;
-    size_t count = parser_get_list_count(&parser);
+    float leval = 0;
+    float reval = 0;
+    if(node->kind == NODE_NUM){
+        *dest = node->num;
+        return true;
+    }else if(node->kind == NODE_UNKNOWN){
+        return false; 
+    }else {
+        bool lr = eval(&leval, node->left);
+        bool rr = eval(&reval, node->right);       
+        if(!(lr & rr)) return false;
 
-    if(count == 1){
-        if(!parser_next(&token, &parser)) return false;
-        if(token.kind == TOK_NUM){
-            dest->kind = NODE_NUM;
-            dest->num = token.num;
-            dest->left = NULL;
-            dest->right = NULL;
-            return true;
-        }else {
-            return false;
+        if(node->kind == NODE_ADD){
+            *dest = leval + reval;
+        }else if(node->kind == NODE_SUB){
+            *dest = leval - reval;
+        }else if(node->kind == NODE_MUL){
+            *dest = leval * reval; 
+        }else if(node->kind == NODE_DIV){
+            if(reval == 0) return false;
+            *dest = leval / reval;
         }
-    }else if(count > 1){
-        parser_at(&token, &parser, 0);
-        if(token.kind != TOK_LPAREN) return false;
-        parser_at(&token, &parser, parser.to);
-        if(token.kind != TOK_RPAREN) return false;
 
-        parser_reset(&parser);
-        ++parser.from;
-        --parser.to;
-
-        bool is_expr = parse_expr(dest, parser);
-        
-        if(is_expr) return true;
+        return true;
     }
-
-    return false;
-}
-
-bool parse_term(Node *dest, Parser parser){
-    if(dest == NULL) return false;
-
-    Token token;
-    Node *left = malloc(sizeof(left[0]));
-    Node *right = malloc(sizeof(right[0]));
-
-    while (parser_next(&token, &parser)) {
-        if(token.kind == TOK_MUL || token.kind == TOK_DIV){
-            dest->kind = token.kind == TOK_MUL ? NODE_MUL : NODE_DIV;
-
-            Parser parser_left = parser_new(parser.list, parser.from, parser.from + parser.offset - 2);
-            Parser parser_right = parser_new(parser.list, parser.from + parser.offset, parser.to);
-
-            parse_term(left, parser_left);
-            bool is_factor = parse_factor(right, parser_right);
-            parser_reset(&parser);
-            bool is_term = parse_term(right, parser_right);
-
-            dest->left = left;
-            dest->right = right;
-
-            if(!is_term && !is_factor) return false;
-            return true;
-        }
-    }
-
-    parser_reset(&parser);
-    bool is_factor = parse_factor(dest, parser);
-
-    return is_factor;
-}
-
-bool parse_expr(Node *dest, Parser parser){
-    if(dest == NULL) return false;
-
-    Token token;
-    Node *left = malloc(sizeof(left[0]));
-    Node *right = malloc(sizeof(right[0]));
-
-    while (parser_next(&token, &parser)) {
-        if(token.kind == TOK_ADD || token.kind == TOK_SUB){
-            dest->kind = token.kind == TOK_ADD ? NODE_ADD : NODE_SUB;
-
-            Parser parser_left = parser_new(parser.list, parser.from, parser.from + parser.offset - 2);
-            Parser parser_right = parser_new(parser.list, parser.from + parser.offset, parser.to);
-
-            parse_term(left, parser_left);
-            bool is_term = parse_term(right, parser_right);
-            parser_reset(&parser);
-            bool is_expr = parse_expr(right, parser_right);
-
-            dest->left = left;
-            dest->right = right;
-
-            if(!is_expr && !is_term) return false;
-            return true;
-        }
-    }
-
-    return false;
 }
 
 int main(void) {
-    char str[] = "1+2*   (2 - 1)";
+    while (1) {
+        fputc('>', stdout);
+        char input_buf[256] = {0};
+        fgets(input_buf, sizeof(input_buf), stdin);
+        size_t len = strlen(input_buf);
+        input_buf[--len] = '\0';
 
-    TokenList list = token_list_alloc();
-    lexer(str, &list);
-    Node node = node_new();
-    Parser parser = parser_new(&list, 0, TOKEN_LIST_END(list));
-    parse_expr(&node, parser);
-    
+        if(len == 1 || input_buf[0] == 'q') break;
+
+        TokenList list = token_list_new();
+        lexer(input_buf, &list);
+        Node *node = NULL;
+        Parser parser = (Parser){
+            .list = &list,
+            .offset = 0,
+        };
+        Arena *arena = arena_alloc();
+        node = parse_expr(arena, &parser);
+
+        float value = 0;
+        bool result = false;
+        result = eval(&value, node);
+        if(result){
+            printf("Result: %.2f\n", value);
+        }else {
+            printf("Invalid Input!\n");
+        }
+
+        token_list_free(&list);
+        arena_free(&arena);
+    }
+
     return 0;
 }
