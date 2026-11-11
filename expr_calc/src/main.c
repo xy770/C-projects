@@ -42,6 +42,8 @@ struct Node{
 typedef struct{
     const TokenList *list;
     size_t offset;
+    bool is_ok;
+    char err_str[64];
 }Parser;
 
 typedef struct Arena Arena;
@@ -187,6 +189,8 @@ Token parser_advance(Parser *parser){
 }
 
 Node* parse_factor(Arena *arena, Parser *parser){
+    if(!parser->is_ok) return NULL;
+
     Node* root = NULL;
 
     TokenKind next = parser_peek(parser).kind;
@@ -206,56 +210,94 @@ Node* parse_factor(Arena *arena, Parser *parser){
         parser_advance(parser);
 
         root = parse_expr(arena, parser);
+        if(!parser->is_ok) return NULL;
 
         TokenKind rparen = parser_advance(parser).kind;
-        assert(rparen == TOK_RPAREN);
+        if(rparen != TOK_RPAREN){
+            parser->is_ok = false;
+            snprintf(parser->err_str, sizeof(parser->err_str),\
+                    "Expect ')' at %d", (int)parser->offset - 1);
+            return NULL;
+        }
 
         return root;
     }
 
+    parser->is_ok = false;
+    snprintf(parser->err_str, sizeof(parser->err_str),\
+            "Not a valid expr!");
     return NULL;
 }
 
 Node* parse_term(Arena *arena, Parser *parser){
+    if(!parser->is_ok) return NULL;
+
     Node *root = NULL;
     Node *left = parse_factor(arena, parser);
-    if(left == NULL) return NULL;
+    if(!parser->is_ok) return NULL;
 
-    TokenKind next = parser_peek(parser).kind;
-    if(next == TOK_MUL || next == TOK_DIV){
-        parser_advance(parser);
+    while (1) {
+        TokenKind next = parser_peek(parser).kind;
+        if(next == TOK_MUL || next == TOK_DIV){
+            parser_advance(parser);
 
-        root = arena_pick(arena, sizeof(*root));
-        if(root == NULL) return NULL;
+            root = arena_pick(arena, sizeof(*root));
+            if(root == NULL){
+                parser->is_ok = false;
+                snprintf(parser->err_str, sizeof(parser->err_str),\
+                        "%s","Failed to alloc memory");
+                return NULL;
+            }
 
-        root->kind = next == TOK_MUL ? NODE_MUL : NODE_DIV;
-        root->left = left;
-        root->right = parse_term(arena, parser);
-        // TODO
+            root->kind = next == TOK_MUL ? NODE_MUL : NODE_DIV;
+            root->left = left;
+            root->right = parse_factor(arena, parser);
+            if(!parser->is_ok) return NULL;
 
-        return root;
+            left = root;
+            root = NULL;
+
+            continue;
+        }
+
+        break;
     }
 
     return left;
 }
 
 Node* parse_expr(Arena *arena, Parser *parser){
+    if(!parser->is_ok) return NULL;
+
     Node* root = NULL;
     Node* left = parse_term(arena, parser);
     if(left == NULL) return NULL;
 
-    TokenKind next = parser_peek(parser).kind;
-    if(next == TOK_ADD || next == TOK_SUB){
-        parser_advance(parser);
+    while (1) {
+        TokenKind next = parser_peek(parser).kind;
+        if(next == TOK_ADD || next == TOK_SUB){
+            parser_advance(parser);
 
-        root = arena_pick(arena, sizeof(*root));
-        if(root == NULL) return NULL;
+            root = arena_pick(arena, sizeof(*root));
+            if(root == NULL){
+                parser->is_ok = false;
+                snprintf(parser->err_str, sizeof(parser->err_str),\
+                        "%s","Failed to alloc memory");
+                return NULL;
+            }
 
-        root->kind = next == TOK_ADD ? NODE_ADD : NODE_SUB;
-        root->left = left;
-        root->right = parse_expr(arena, parser);
+            root->kind = next == TOK_ADD ? NODE_ADD : NODE_SUB;
+            root->left = left;
+            root->right = parse_term(arena, parser);
+            if(!parser->is_ok) return NULL;
 
-        return root;
+            left = root;
+            root = NULL;
+
+            continue;
+        }
+
+        break;
     }
 
     return left;
@@ -326,6 +368,8 @@ bool lexer(char* in, TokenList *out){
             p = lexer_single(p, &tok); 
             token_list_append(out, tok);
             continue;
+        }else {
+            return false;
         }
     }
 
@@ -365,22 +409,37 @@ bool eval(float* dest, const Node* node){
 int main(void) {
     while (1) {
         fputc('>', stdout);
+        fflush(stdout);
+
         char input_buf[256] = {0};
-        fgets(input_buf, sizeof(input_buf), stdin);
+        if(fgets(input_buf, sizeof(input_buf), stdin) == NULL){
+            break;
+        }
         size_t len = strlen(input_buf);
         input_buf[--len] = '\0';
 
         if(len == 1 || input_buf[0] == 'q') break;
 
         TokenList list = token_list_new();
-        lexer(input_buf, &list);
+        bool lexer_result = lexer(input_buf, &list);
+        if(!lexer_result){
+            printf("Detect invalid character\n");
+            continue;
+        }
+
         Node *node = NULL;
         Parser parser = (Parser){
             .list = &list,
             .offset = 0,
+            .is_ok = true,
+            .err_str = "",
         };
         Arena *arena = arena_alloc();
         node = parse_expr(arena, &parser);
+        if(!parser.is_ok){
+            printf("Error: %s\n", parser.err_str);
+            goto clean_up;
+        }
 
         float value = 0;
         bool result = false;
@@ -391,6 +450,7 @@ int main(void) {
             printf("Invalid Input!\n");
         }
 
+clean_up:
         token_list_free(&list);
         arena_free(&arena);
     }
