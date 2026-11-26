@@ -23,17 +23,20 @@ int32_t pop(Stack *stack){
 
 int32_t peek(Stack *stack){
     assert(stack->sp >= 1);
-    return stack->stack[stack->sp];
+    return stack->stack[stack->sp - 1];
+}
+
+int8_t is_empty(Stack *stack){
+    return stack->sp == 0 ? 1 : 0;
 }
 
 void push(Stack *stack, int32_t v){
     stack->stack[stack->sp++] = v;
 }
 
-int8_t to_post(char *expr, uint32_t len){
+void to_post(char *expr, uint32_t len){
     Stack stack = { 0 };
     char output[256] = { 0 };
-    uint32_t out_p = 0;
 
     for(int i = 0; i < len;){
         if(is_digit(expr[i])){
@@ -43,11 +46,43 @@ int8_t to_post(char *expr, uint32_t len){
                 ++i;
             }
 
-            sprintf("");
-        }else if(expr[i] == '+'){
-
+            sprintf(output, "%s %d", output, result);
+        }else if(expr[i] == '+' || expr[i] == '-'){
+            if(is_empty(&stack)){
+                push(&stack, expr[i]);
+            }else {
+                while (!is_empty(&stack)) {
+                    char op = pop(&stack);
+                    sprintf(output, "%s %c", output, op);
+                }
+                push(&stack, expr[i]);
+            }
+            ++i;
+        }else if(expr[i] == '*' || expr[i] == '/'){
+            if(is_empty(&stack)){
+                push(&stack, expr[i]);
+            }else if(peek(&stack) == '+' || peek(&stack) == '-'){
+                push(&stack, expr[i]);
+            }else {
+                while (!is_empty(&stack) || peek(&stack) == '*' || peek(&stack) == '/') {
+                    char op = pop(&stack);
+                    sprintf(output, "%s %c", output, op);
+                }
+                push(&stack, expr[i]);
+            }
+            ++i;
+        }else{
+            ++i;
         }
     }
+
+    while (!is_empty(&stack)) {
+        char op = pop(&stack);
+    
+        sprintf(output, "%s %c", output, op);
+    }
+
+    sprintf(expr, "%s", output);
 }
 
 int32_t eval(const char *expr, uint32_t len){
@@ -100,7 +135,9 @@ int main(void){
     fgets(expr, sizeof(expr), stdin);
 
     uint32_t len = strlen(expr);
+    to_post(expr, len);
+    len = strlen(expr);
     int32_t result = eval(expr, len);
-    printf("Result: %d", result);
+    printf("Result: %d\n", result);
 }
 
